@@ -1,0 +1,175 @@
+import cv2
+import os
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+import numpy as np
+from google.colab.patches import cv2_imshow
+import urllib
+
+def thingspeak_post(valm):
+    val= "x"+valm
+    URl='https://api.thingspeak.com/update?api_key='
+    KEY='1FG15IJIE1PBT7SD'
+    HEADER='&field1={}'.format(val)
+    NEW_URL = URl+KEY+HEADER
+    print(NEW_URL)
+    data=urllib.request.urlopen(NEW_URL)
+    print(data)
+
+faceCascade = cv2.CascadeClassifier("haarcascade_frontalface_alt2.xml")
+model = load_model("mask_recog.h5")
+
+def face_mask_detector(frame):
+  # frame = cv2.imread(fileName)
+  gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+  faces = faceCascade.detectMultiScale(gray,
+                                        scaleFactor=1.1,
+                                        minNeighbors=5,
+                                        minSize=(60, 60),
+                                        flags=cv2.CASCADE_SCALE_IMAGE)
+  faces_list=[]
+  preds=[]
+  for (x, y, w, h) in faces:
+      face_frame = frame[y:y+h,x:x+w]
+      face_frame = cv2.cvtColor(face_frame, cv2.COLOR_BGR2RGB)
+      face_frame = cv2.resize(face_frame, (224, 224))
+      face_frame = img_to_array(face_frame)
+      face_frame = np.expand_dims(face_frame, axis=0)
+      face_frame =  preprocess_input(face_frame)
+      faces_list.append(face_frame)
+      if len(faces_list)>0:
+          preds = model.predict(faces_list)
+      for pred in preds:
+          (mask, withoutMask) = pred
+      label = "Mask" if mask > withoutMask else "No Mask"
+      color = (0, 255, 0) if label == "Mask" else (0, 0, 255)
+      label = "{}: {:.2f}%".format(label, max(mask, withoutMask) * 100)
+      cv2.putText(frame, label, (x, y- 10),
+                  cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
+      cv2.rectangle(frame, (x, y), (x + w, y + h),color, 3)
+  cv2_imshow(frame)
+  return frame,label
+In [12]:
+from IPython.display import display, Javascript
+from google.colab.output import eval_js
+from base64 import b64decode
+
+def take_photo(filename='photo.jpg', quality=0.8):
+  js = Javascript('''
+    async function takePhoto(quality) {
+      const div = document.createElement('div');
+      const capture = document.createElement('button');
+      capture.textContent = 'Capture';
+      div.appendChild(capture);
+
+      const video = document.createElement('video');
+      video.style.display = 'block';
+      const stream = await navigator.mediaDevices.getUserMedia({video: true});
+
+      document.body.appendChild(div);
+      div.appendChild(video);
+      video.srcObject = stream;
+      await video.play();
+
+      // Resize the output to fit the video element.
+      google.colab.output.setIframeHeight(document.documentElement.scrollHeight, true);
+
+      // Wait for Capture to be clicked.
+      await new Promise((resolve) => capture.onclick = resolve);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      stream.getVideoTracks()[0].stop();
+      div.remove();
+      return canvas.toDataURL('image/jpeg', quality);
+    }
+    ''')
+  display(js)
+  data = eval_js('takePhoto({})'.format(quality))
+  binary = b64decode(data.split(',')[1])
+  with open(filename, 'wb') as f:
+    f.write(binary)
+  return filename
+In [13]:
+input_image = cv2.imread(take_photo())
+output,label = face_mask_detector(input_image)
+cv2_imshow(output)
+a=label[0]
+print(a)
+thingspeak_post(a)
+<IPython.core.display.Javascript object>
+
+
+N
+https://api.thingspeak.com/update?api_key=1FG15IJIE1PBT7SD&field1=xN
+<http.client.HTTPResponse object at 0x7f37e3c8eac8>
+In [14]:
+import urllib.request
+
+#posting data to thingspeak from python 
+
+val = 10 #your data to post it on thingspeak
+url = "https://api.thingspeak.com/update?api_key=1FG15IJIE1PBT7SD&field1="+str(val) #copy this from write a channel feed
+response = urllib.request.urlopen(url)
+print("Response after posting ",response,"\n")
+
+#reading data from thingspeak and posting to python
+
+url = "https://api.thingspeak.com/channels/1138430/feeds.json?api_key=HM7BJ25A8GHKUXY3&results=2" #copy this from read a channel feed
+response = urllib.request.urlopen(url)
+print("Response after reading ",response.read(),"\n")
+Response after posting  <http.client.HTTPResponse object at 0x7f37e3c8ea90> 
+
+---------------------------------------------------------------------------
+HTTPError                                 Traceback (most recent call last)
+<ipython-input-14-7c485586e9cc> in <module>()
+     11 
+     12 url = "https://api.thingspeak.com/channels/1138430/feeds.json?api_key=HM7BJ25A8GHKUXY3&results=2" #copy this from read a channel feed
+---> 13 response = urllib.request.urlopen(url)
+     14 print("Response after reading ",response.read(),"\n")
+
+/usr/lib/python3.6/urllib/request.py in urlopen(url, data, timeout, cafile, capath, cadefault, context)
+    221     else:
+    222         opener = _opener
+--> 223     return opener.open(url, data, timeout)
+    224 
+    225 def install_opener(opener):
+
+/usr/lib/python3.6/urllib/request.py in open(self, fullurl, data, timeout)
+    530         for processor in self.process_response.get(protocol, []):
+    531             meth = getattr(processor, meth_name)
+--> 532             response = meth(req, response)
+    533 
+    534         return response
+
+/usr/lib/python3.6/urllib/request.py in http_response(self, request, response)
+    640         if not (200 <= code < 300):
+    641             response = self.parent.error(
+--> 642                 'http', request, response, code, msg, hdrs)
+    643 
+    644         return response
+
+/usr/lib/python3.6/urllib/request.py in error(self, proto, *args)
+    568         if http_err:
+    569             args = (dict, 'default', 'http_error_default') + orig_args
+--> 570             return self._call_chain(*args)
+    571 
+    572 # XXX probably also want an abstract factory that knows when it makes
+
+/usr/lib/python3.6/urllib/request.py in _call_chain(self, chain, kind, meth_name, *args)
+    502         for handler in handlers:
+    503             func = getattr(handler, meth_name)
+--> 504             result = func(*args)
+    505             if result is not None:
+    506                 return result
+
+/usr/lib/python3.6/urllib/request.py in http_error_default(self, req, fp, code, msg, hdrs)
+    648 class HTTPDefaultErrorHandler(BaseHandler):
+    649     def http_error_default(self, req, fp, code, msg, hdrs):
+--> 650         raise HTTPError(req.full_url, code, msg, hdrs, fp)
+    651 
+    652 class HTTPRedirectHandler(BaseHandler):
